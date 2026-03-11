@@ -1,6 +1,7 @@
 #include <iostream>
 #include <cassert>
 #include <mutex>
+#include <thread>
 
 using namespace std;
 
@@ -59,11 +60,18 @@ public:
             frame->lock_internal();
         }
     }
+
+    ReadGuard(const ReadGuard&) = delete;
+    ReadGuard& operator=(const ReadGuard&) = delete;
     ~ReadGuard() {
         if (frame != nullptr) {
             frame->unlock_internal();
             frame->unpin_internal();
         }
+    }
+
+    ReadGuard(ReadGuard&& other) noexcept : frame(other.frame) {
+
     }
 };
 
@@ -77,6 +85,9 @@ public:
             frame->lock_internal();
         }
     }
+
+    WriteGuard(const WriteGuard&) = delete;
+    WriteGuard& operator=(const WriteGuard&) = delete;
     ~WriteGuard() {
         if (frame != nullptr) {
             frame->unlock_internal();
@@ -141,4 +152,37 @@ int main() {
         cout << "after move assign: " << pf.get_pin_count() << "\n"; // should be 1
     }
     cout << "after scope2: " << pf.get_pin_count() << "\n"; // 0
+
+
+    cout << "pin before read: " << pf.get_pin_count() << "\n";
+    {
+        ReadGuard rg(&pf);
+        cout << "pin inside read: " << pf.get_pin_count() << "\n";
+    }
+    cout << "pin after read: " << pf.get_pin_count() << "\n";
+
+    cout << "dirty before: " << pf.is_dirty() << "\n";
+    {
+        WriteGuard wg(&pf);
+        wg.mark_dirty();
+        cout << "dirty inside: " << pf.is_dirty() << "\n";
+    }
+    cout << "dirty after: " << pf.is_dirty() << "\n";
+
+
+    auto t1 = std::thread([&pf]() {
+        WriteGuard wg(&pf);
+        cout << "t1 acquired\n";
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        cout << "t1 releasing\n";
+    });
+
+    auto t2 = std::thread([&pf]() {
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        ReadGuard rg(&pf);
+        cout << "t2 acquired\n";
+    });
+
+    t1.join();
+    t2.join();
 }
